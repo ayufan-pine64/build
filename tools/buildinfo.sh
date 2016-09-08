@@ -19,7 +19,7 @@ echo "ro.build.tags=$BUILD_VERSION_TAGS"
 echo "ro.build.flavor=$TARGET_BUILD_FLAVOR"
 echo "ro.product.model=fugu"
 echo "ro.product.brand=Android"
-echo "ro.product.name=$PRODUCT_NAME"
+echo "ro.product.name=fugu"
 echo "ro.product.device=fugu"
 echo "ro.product.board=$TARGET_BOOTLOADER_BOARD_NAME"
 
