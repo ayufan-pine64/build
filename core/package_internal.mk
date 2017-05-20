@@ -140,9 +140,9 @@ my_overlay_resources := $(strip \
     $(addprefix $(d)/, \
         $(call find-subdir-assets,$(d)))))
 
-my_res_resources := $(strip \
+my_res_resources := $(if $(my_res_dir),$(strip \
     $(addprefix $(my_res_dir)/, \
-        $(call find-subdir-assets,$(my_res_dir))))
+        $(call find-subdir-assets,$(my_res_dir)))))
 
 all_resources := $(strip $(my_res_resources) $(my_overlay_resources))
 
@@ -251,25 +251,26 @@ LOCAL_STATIC_JAVA_LIBRARIES += jacocoagent
 LOCAL_PROGUARD_FLAGS += -include $(BUILD_SYSTEM)/proguard.jacoco.flags
 LOCAL_JACK_PROGUARD_FLAGS += -include $(BUILD_SYSTEM)/proguard.jacoco.flags
 endif # Contains java code
-else
+else  # ! LOCAL_JACK_ENABLED
 LOCAL_STATIC_JAVA_LIBRARIES += emma
-endif # LOCAL_JACK_ENABLED
-else
+endif # ! LOCAL_JACK_ENABLED
+else  # ! TARGET_BUILD_APPS
+ifdef LOCAL_JACK_ENABLED
 # If build against the SDK in full build, core.jar is not used
 # so coverage classes are not present.
-ifdef LOCAL_JACK_ENABLED
 # Jack needs jacoco on the classpath but we do not want it to be in
 # the final apk. While it is a static library, we add it to the
 # LOCAL_JAVA_LIBRARIES which are only present on the classpath.
 # Note: we have nothing to do for proguard since jacoco will be
 # on the classpath only, thus not modified during the compilation.
 LOCAL_JAVA_LIBRARIES += jacocoagent
-else
-# We have to use prebuilt emma.jar to make Proguard happy;
+else  # ! LOCAL_JACK_ENABLED
+# If build against the SDK in full build, core.jar is not used,
+# we have to use prebiult emma.jar to make Proguard happy;
 # Otherwise emma classes are included in core.jar.
 LOCAL_PROGUARD_FLAGS += -libraryjars $(EMMA_JAR)
-endif # LOCAL_JACK_ENABLED
-endif # full build
+endif # ! LOCAL_JACK_ENABLED
+endif # ! TARGET_BUILD_APPS
 endif # LOCAL_SDK_VERSION
 endif # EMMA_INSTRUMENT_STATIC
 endif # LOCAL_EMMA_INSTRUMENT
@@ -307,13 +308,6 @@ endif
 
 $(LOCAL_INTERMEDIATE_TARGETS): \
     PRIVATE_ANDROID_MANIFEST := $(full_android_manifest)
-ifneq (,$(filter-out current system_current test_current, $(LOCAL_SDK_VERSION)))
-$(LOCAL_INTERMEDIATE_TARGETS): \
-    PRIVATE_DEFAULT_APP_TARGET_SDK := $(LOCAL_SDK_VERSION)
-else
-$(LOCAL_INTERMEDIATE_TARGETS): \
-    PRIVATE_DEFAULT_APP_TARGET_SDK := $(DEFAULT_APP_TARGET_SDK)
-endif
 
 ifeq ($(LOCAL_DATA_BINDING),true)
 data_binding_stamp := $(data_binding_intermediates)/data-binding.stamp
@@ -494,6 +488,7 @@ ifeq ($(dir $(strip $(LOCAL_CERTIFICATE))),./)
 endif
 private_key := $(LOCAL_CERTIFICATE).pk8
 certificate := $(LOCAL_CERTIFICATE).x509.pem
+additional_certificates := $(foreach c,$(LOCAL_ADDITIONAL_CERTIFICATES), $(c).x509.pem $(c).pk8)
 
 $(LOCAL_BUILT_MODULE): $(private_key) $(certificate) $(SIGNAPK_JAR)
 $(LOCAL_BUILT_MODULE): PRIVATE_PRIVATE_KEY := $(private_key)
@@ -502,8 +497,8 @@ $(LOCAL_BUILT_MODULE): PRIVATE_CERTIFICATE := $(certificate)
 PACKAGES.$(LOCAL_PACKAGE_NAME).PRIVATE_KEY := $(private_key)
 PACKAGES.$(LOCAL_PACKAGE_NAME).CERTIFICATE := $(certificate)
 
-$(LOCAL_BUILT_MODULE): PRIVATE_ADDITIONAL_CERTIFICATES := $(foreach c,\
-    $(LOCAL_ADDITIONAL_CERTIFICATES), $(c).x509.pem $(c).pk8)
+$(LOCAL_BUILT_MODULE): $(additional_certificates)
+$(LOCAL_BUILT_MODULE): PRIVATE_ADDITIONAL_CERTIFICATES := $(additional_certificates)
 
 # Define the rule to build the actual package.
 # PRIVATE_JNI_SHARED_LIBRARIES is a list of <abi>:<path_of_built_lib>.
@@ -535,15 +530,8 @@ $(LOCAL_BUILT_MODULE) : $(all_res_assets) $(full_android_manifest) $(AAPT)
 endif
 	@echo "target Package: $(PRIVATE_MODULE) ($@)"
 ifdef LOCAL_USE_AAPT2
-ifdef LOCAL_JACK_ENABLED
 	$(call copy-file-to-new-target)
-else
-	@# TODO: implement merge-two-packages.
-	$(if $(PRIVATE_SOURCE_ARCHIVE),\
-	  $(call merge-two-packages,$(PRIVATE_RES_PACKAGE) $(PRIVATE_SOURCE_ARCHIVE),$@),
-	  $(call copy-file-to-new-target))
-endif
-else  # LOCAL_USE_AAPT2
+else  # ! LOCAL_USE_AAPT2
 ifdef LOCAL_JACK_ENABLED
 	$(create-empty-package)
 else
@@ -623,7 +611,7 @@ $(built_apk_splits) : $(built_module_path)/%.apk : $(LOCAL_BUILT_MODULE)
 	$(sign-package)
 
 # Rules to install the splits
-$(installed_apk_splits) : $(my_module_path)/$(LOCAL_MODULE)_%.apk : $(built_module_path)/package_%.apk | $(ACP)
+$(installed_apk_splits) : $(my_module_path)/$(LOCAL_MODULE)_%.apk : $(built_module_path)/package_%.apk
 	@echo "Install: $@"
 	$(copy-file-to-new-target)
 
@@ -633,27 +621,23 @@ ALL_MODULES.$(my_register_name).BUILT_INSTALLED += \
   $(foreach s,$(my_split_suffixes),$(built_module_path)/package_$(s).apk:$(my_module_path)/$(LOCAL_MODULE)_$(s).apk)
 
 # Make sure to install the splits when you run "make <module_name>".
-$(my_register_name): $(installed_apk_splits)
+$(my_all_targets): $(installed_apk_splits)
 
 ifdef LOCAL_COMPATIBILITY_SUITE
-cts_testcase_file := $(foreach s,$(my_split_suffixes),$(COMPATIBILITY_TESTCASES_OUT_$(LOCAL_COMPATIBILITY_SUITE))/$(LOCAL_MODULE)_$(s).apk)
-$(cts_testcase_file) : $(COMPATIBILITY_TESTCASES_OUT_$(LOCAL_COMPATIBILITY_SUITE))/$(LOCAL_MODULE)_%.apk : $(built_module_path)/package_%.apk | $(ACP)
-	$(copy-file-to-new-target)
 
-COMPATIBILITY.$(LOCAL_COMPATIBILITY_SUITE).FILES := \
-  $(COMPATIBILITY.$(LOCAL_COMPATIBILITY_SUITE).FILES) \
-  $(cts_testcase_file)
+$(foreach suite, $(LOCAL_COMPATIBILITY_SUITE), \
+  $(eval my_compat_dist_$(suite) := $(foreach dir, $(call compatibility_suite_dirs,$(suite)), \
+    $(foreach s,$(my_split_suffixes),\
+      $(built_module_path)/package_$(s).apk:$(dir)/$(LOCAL_MODULE)_$(s).apk))))
 
-$(my_register_name) : $(cts_testcase_file)
+$(call create-suite-dependencies)
+
 endif # LOCAL_COMPATIBILITY_SUITE
 endif # LOCAL_PACKAGE_SPLITS
 
 # Save information about this package
 PACKAGES.$(LOCAL_PACKAGE_NAME).OVERRIDES := $(strip $(LOCAL_OVERRIDES_PACKAGES))
 PACKAGES.$(LOCAL_PACKAGE_NAME).RESOURCE_FILES := $(all_resources)
-ifdef package_resource_overlays
-PACKAGES.$(LOCAL_PACKAGE_NAME).RESOURCE_OVERLAYS := $(package_resource_overlays)
-endif
 
 PACKAGES := $(PACKAGES) $(LOCAL_PACKAGE_NAME)
 

@@ -13,7 +13,7 @@ TARGET_PRELINK_MODULE := false
 
 TARGET_2ND_CPU_ABI := x86
 TARGET_2ND_ARCH := x86
-TARGET_2ND_ARCH_VARIANT := x86
+TARGET_2ND_ARCH_VARIANT := x86_64
 
 TARGET_USES_64_BIT_BINDER := true
 
@@ -28,6 +28,7 @@ USE_CAMERA_STUB := true
 # of an SDK AVD. Note that this operation only works on Linux for now
 ifeq ($(HOST_OS),linux)
 WITH_DEXPREOPT ?= true
+WITH_DEXPREOPT_BOOT_IMG_ONLY ?= false
 endif
 
 # Build OpenGLES emulation host and guest libraries

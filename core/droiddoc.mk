@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 
+$(call record-module-type,DROIDDOC)
 ##
 ##
 ## Common to both droiddoc and javadoc
@@ -165,7 +166,6 @@ $(full_target): \
         $(droiddoc) \
         $(html_dir_files) \
         $(full_java_lib_deps) \
-        $(LOCAL_MODULE_MAKEFILE_DEP) \
         $(LOCAL_ADDITIONAL_DEPENDENCIES)
 	@echo Docs droiddoc: $(PRIVATE_OUT_DIR)
 	$(hide) mkdir -p $(dir $@)

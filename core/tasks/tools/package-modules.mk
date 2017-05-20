@@ -9,21 +9,32 @@
 #
 #
 
+my_makefile := $(lastword $(filter-out $(lastword $(MAKEFILE_LIST)),$(MAKEFILE_LIST)))
 my_staging_dir := $(call intermediates-dir-for,PACKAGING,$(my_package_name))
 my_built_modules :=
 my_copy_pairs :=
 my_pickup_files :=
 
+# Iterate over the modules and include their direct dependencies stated in the
+# LOCAL_REQUIRED_MODULES.
+my_modules_and_deps := $(my_modules)
+$(foreach m,$(my_modules),\
+  $(eval _explicitly_required := \
+    $(strip $(ALL_MODULES.$(m).EXPLICITLY_REQUIRED)\
+    $(ALL_MODULES.$(m)$(TARGET_2ND_ARCH_MODULE_SUFFIX).EXPLICITLY_REQUIRED)))\
+  $(eval my_modules_and_deps += $(_explicitly_required))\
+)
+
 # Iterate over modules' built files and installed files;
 # Calculate the dest files in the output zip file.
 
-$(foreach m,$(my_modules),\
+$(foreach m,$(my_modules_and_deps),\
   $(eval _pickup_files := $(strip $(ALL_MODULES.$(m).PICKUP_FILES)\
     $(ALL_MODULES.$(m)$(TARGET_2ND_ARCH_MODULE_SUFFIX).PICKUP_FILES)))\
   $(eval _built_files := $(strip $(ALL_MODULES.$(m).BUILT_INSTALLED)\
     $(ALL_MODULES.$(m)$(TARGET_2ND_ARCH_MODULE_SUFFIX).BUILT_INSTALLED)))\
   $(if $(_pickup_files)$(_built_files),,\
-    $(warning Unknown installed file for module '$(m)'))\
+    $(shell $(call echo-warning,$(my_makefile),$(my_package_name): Unknown installed file for module '$(m)')))\
   $(eval my_pickup_files += $(_pickup_files))\
   $(foreach i, $(_built_files),\
     $(eval bui_ins := $(subst :,$(space),$(i)))\

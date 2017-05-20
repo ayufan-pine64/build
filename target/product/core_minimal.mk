@@ -59,7 +59,6 @@ PRODUCT_PACKAGES += \
     keystore \
     keystore.default \
     ld.mc \
-    libbcc \
     libOpenMAXAL \
     libOpenSLES \
     libdownmix \
@@ -68,11 +67,14 @@ PRODUCT_PACKAGES += \
     libfilterfw \
     libkeystore \
     libgatekeeper \
+    libwebviewchromium_loader \
+    libwebviewchromium_plat_support \
     libwilhelm \
     logd \
     make_ext4fs \
     e2fsck \
     resize2fs \
+    tune2fs \
     screencap \
     sensorservice \
     telephony-common \
@@ -80,6 +82,7 @@ PRODUCT_PACKAGES += \
     uncrypt \
     voip-common \
     webview \
+    webview_zygote \
     wifi-service
 
 PRODUCT_COPY_FILES += \
@@ -91,7 +94,7 @@ PRODUCT_BOOT_JARS := \
     core-libart \
     conscrypt \
     okhttp \
-    core-junit \
+    legacy-test \
     bouncycastle \
     ext \
     framework \

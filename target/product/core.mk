@@ -25,6 +25,7 @@ PRODUCT_PACKAGES += \
     BlockedNumberProvider \
     BookmarkProvider \
     Browser2 \
+    BuiltInPrintService \
     Calendar \
     CalendarProvider \
     CaptivePortalLogin \
@@ -44,6 +45,7 @@ PRODUCT_PACKAGES += \
     Launcher2 \
     ManagedProvisioning \
     MtpDocumentsProvider \
+    NetworkRecommendation \
     PicoTts \
     PacProcessor \
     libpac \

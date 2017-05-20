@@ -49,8 +49,7 @@ pathmap_INCL := \
     audio-route:system/media/audio_route/include \
     wilhelm:frameworks/wilhelm/include \
     wilhelm-ut:frameworks/wilhelm/src/ut \
-    mediandk:frameworks/av/media/ndk/ \
-    speex:external/speex/include
+    mediandk:frameworks/av/media/ndk/
 
 #
 # Returns the path to the requested module's include directory,
@@ -115,7 +114,6 @@ FRAMEWORKS_SUPPORT_SUBDIRS := \
         v7/cardview \
         v7/mediarouter \
         v7/palette \
-        v8/renderscript \
         v13 \
         v17/leanback \
         design \
@@ -142,6 +140,7 @@ FRAMEWORKS_MULTIDEX_SUBDIRS := \
 FRAMEWORKS_SUPPORT_JAVA_SRC_DIRS := \
 	$(addprefix frameworks/support/,$(FRAMEWORKS_SUPPORT_SUBDIRS)) \
 	$(addprefix frameworks/,$(FRAMEWORKS_MULTIDEX_SUBDIRS)) \
+        frameworks/rs/support \
         frameworks/support/graphics/drawable/animated \
         frameworks/support/graphics/drawable/static \
 	frameworks/support/v7/appcompat/src \
@@ -157,6 +156,7 @@ FRAMEWORKS_SUPPORT_JAVA_LIBRARIES := \
     android-support-animatedvectordrawable \
     android-support-v7-appcompat \
     android-support-v7-recyclerview \
+    android-support-v8-renderscript \
     android-support-multidex \
     android-support-multidex-instrumentation
 

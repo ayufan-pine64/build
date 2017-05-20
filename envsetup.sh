@@ -89,7 +89,7 @@ function get_abs_build_var()
 {
     if [ "$BUILD_VAR_CACHE_READY" = "true" ]
     then
-        eval echo \"\${abs_var_cache_$1}\"
+        eval "echo \"\${abs_var_cache_$1}\""
     return
     fi
 
@@ -107,7 +107,7 @@ function get_build_var()
 {
     if [ "$BUILD_VAR_CACHE_READY" = "true" ]
     then
-        eval echo \"\${var_cache_$1}\"
+        eval "echo \"\${var_cache_$1}\""
     return
     fi
 
@@ -260,6 +260,12 @@ function setpaths()
     unset ANDROID_HOST_OUT
     export ANDROID_HOST_OUT=$(get_abs_build_var HOST_OUT)
 
+    unset ANDROID_HOST_OUT_TESTCASES
+    export ANDROID_HOST_OUT_TESTCASES=$(get_abs_build_var HOST_OUT_TESTCASES)
+
+    unset ANDROID_TARGET_OUT_TESTCASES
+    export ANDROID_TARGET_OUT_TESTCASES=$(get_abs_build_var TARGET_OUT_TESTCASES)
+
     # needed for building linux on MacOS
     # TODO: fix the path
     #export HOST_EXTRACFLAGS="-I "$T/system/kernel_headers/host_include
@@ -290,7 +296,7 @@ function set_stuff_for_environment()
 
 function set_sequence_number()
 {
-    export BUILD_ENV_SEQUENCE_NUMBER=10
+    export BUILD_ENV_SEQUENCE_NUMBER=12
 }
 
 function settitle()
@@ -715,11 +721,18 @@ function getdriver()
     local T="$1"
     test "$WITH_STATIC_ANALYZER" = "0" && unset WITH_STATIC_ANALYZER
     if [ -n "$WITH_STATIC_ANALYZER" ]; then
+        # Use scan-build to collect all static analyzer reports into directory
+        # /tmp/scan-build-yyyy-mm-dd-hhmmss-*
+        # The clang compiler passed by --use-analyzer here is not important.
+        # build/core/binary.mk will set CLANG_CXX and CLANG before calling
+        # c++-analyzer and ccc-analyzer.
+        local CLANG_VERSION=$(get_build_var LLVM_PREBUILTS_VERSION)
+        local BUILD_OS=$(get_build_var BUILD_OS)
+        local CLANG_DIR="$T/prebuilts/clang/host/${BUILD_OS}-x86/${CLANG_VERSION}"
         echo "\
-$T/prebuilts/misc/linux-x86/analyzer/tools/scan-build/scan-build \
---use-analyzer $T/prebuilts/misc/linux-x86/analyzer/bin/analyzer \
---status-bugs \
---top=$T"
+${CLANG_DIR}/tools/scan-build/bin/scan-build \
+--use-analyzer ${CLANG_DIR}/bin/clang \
+--status-bugs"
     fi
 }
 
@@ -742,7 +755,7 @@ function findmakefile()
     T=
     while [ \( ! \( -f $TOPFILE \) \) -a \( $PWD != "/" \) ]; do
         T=`PWD= /bin/pwd`
-        if [ -f "$T/Android.mk" ]; then
+        if [ -f "$T/Android.mk" -o -f "$T/Android.bp" ]; then
             echo $T/Android.mk
             \cd $HERE
             return
@@ -782,10 +795,16 @@ function mm()
             done
             if [ -n "$GET_INSTALL_PATH" ]; then
               MODULES=
-              ARGS=GET-INSTALL-PATH
+              ARGS=GET-INSTALL-PATH-IN-$(dirname ${M})
+              ARGS=${ARGS//\//-}
             else
-              MODULES=all_modules
+              MODULES=MODULES-IN-$(dirname ${M})
+              # Convert "/" to "-".
+              MODULES=${MODULES//\//-}
               ARGS=$@
+            fi
+            if [ "1" = "${WITH_TIDY_ONLY}" -o "true" = "${WITH_TIDY_ONLY}" ]; then
+              MODULES=tidy_only
             fi
             ONE_SHOT_MAKEFILE=$M $DRV make -C $T -f build/core/main.mk $MODULES $ARGS
         fi
@@ -799,28 +818,38 @@ function mmm()
     if [ "$T" ]; then
         local MAKEFILE=
         local MODULES=
+        local MODULES_IN_PATHS=
         local ARGS=
         local DIR TO_CHOP
+        local DIR_MODULES
         local GET_INSTALL_PATH=
+        local GET_INSTALL_PATHS=
         local DASH_ARGS=$(echo "$@" | awk -v RS=" " -v ORS=" " '/^-.*$/')
         local DIRS=$(echo "$@" | awk -v RS=" " -v ORS=" " '/^[^-].*$/')
         for DIR in $DIRS ; do
-            MODULES=`echo $DIR | sed -n -e 's/.*:\(.*$\)/\1/p' | sed 's/,/ /'`
-            if [ "$MODULES" = "" ]; then
-                MODULES=all_modules
-            fi
+            DIR_MODULES=`echo $DIR | sed -n -e 's/.*:\(.*$\)/\1/p' | sed 's/,/ /'`
             DIR=`echo $DIR | sed -e 's/:.*//' -e 's:/$::'`
-            if [ -f $DIR/Android.mk ]; then
+            # Remove the leading ./ and trailing / if any exists.
+            DIR=${DIR#./}
+            DIR=${DIR%/}
+            if [ -f $DIR/Android.mk -o -f $DIR/Android.bp ]; then
                 local TO_CHOP=`(\cd -P -- $T && pwd -P) | wc -c | tr -d ' '`
                 local TO_CHOP=`expr $TO_CHOP + 1`
                 local START=`PWD= /bin/pwd`
-                local MFILE=`echo $START | cut -c${TO_CHOP}-`
-                if [ "$MFILE" = "" ] ; then
-                    MFILE=$DIR/Android.mk
+                local MDIR=`echo $START | cut -c${TO_CHOP}-`
+                if [ "$MDIR" = "" ] ; then
+                    MDIR=$DIR
                 else
-                    MFILE=$MFILE/$DIR/Android.mk
+                    MDIR=$MDIR/$DIR
                 fi
-                MAKEFILE="$MAKEFILE $MFILE"
+                MDIR=${MDIR%/.}
+                if [ "$DIR_MODULES" = "" ]; then
+                    MODULES_IN_PATHS="$MODULES_IN_PATHS MODULES-IN-$MDIR"
+                    GET_INSTALL_PATHS="$GET_INSTALL_PATHS GET-INSTALL-PATH-IN-$MDIR"
+                else
+                    MODULES="$MODULES $DIR_MODULES"
+                fi
+                MAKEFILE="$MAKEFILE $MDIR/Android.mk"
             else
                 case $DIR in
                   showcommands | snod | dist | *=*) ARGS="$ARGS $DIR";;
@@ -835,10 +864,17 @@ function mmm()
             fi
         done
         if [ -n "$GET_INSTALL_PATH" ]; then
-          ARGS=$GET_INSTALL_PATH
+          ARGS=${GET_INSTALL_PATHS//\//-}
           MODULES=
+          MODULES_IN_PATHS=
         fi
-        ONE_SHOT_MAKEFILE="$MAKEFILE" $DRV make -C $T -f build/core/main.mk $DASH_ARGS $MODULES $ARGS
+        if [ "1" = "${WITH_TIDY_ONLY}" -o "true" = "${WITH_TIDY_ONLY}" ]; then
+          MODULES=tidy_only
+          MODULES_IN_PATHS=
+        fi
+        # Convert "/" to "-".
+        MODULES_IN_PATHS=${MODULES_IN_PATHS//\//-}
+        ONE_SHOT_MAKEFILE="$MAKEFILE" $DRV make -C $T -f build/core/main.mk $DASH_ARGS $MODULES $MODULES_IN_PATHS $ARGS
     else
         echo "Couldn't locate the top of the tree.  Try setting TOP."
         return 1
@@ -856,8 +892,10 @@ function mma()
       echo "Couldn't locate the top of the tree.  Try setting TOP."
       return 1
     fi
-    local MY_PWD=`PWD= /bin/pwd|sed 's:'$T'/::'`
-    local MODULES_IN_PATHS=MODULES-IN-$MY_PWD
+    local M=$(findmakefile)
+    # Remove the path to top as the makefilepath needs to be relative
+    local M=`echo $M|sed 's:'$T'/::'`
+    local MODULES_IN_PATHS=MODULES-IN-$(dirname ${M})
     # Convert "/" to "-".
     MODULES_IN_PATHS=${MODULES_IN_PATHS//\//-}
     $DRV make -C $T -f build/core/main.mk $@ $MODULES_IN_PATHS
@@ -909,7 +947,11 @@ function croot()
 {
     T=$(gettop)
     if [ "$T" ]; then
-        \cd $(gettop)
+        if [ "$1" ]; then
+            \cd $(gettop)/$1
+        else
+            \cd $(gettop)
+        fi
     else
         echo "Couldn't locate the top of the tree.  Try setting TOP."
     fi
@@ -1022,7 +1064,7 @@ function coredump_enable()
         return;
     fi;
     echo "Setting core limit for $PID to infinite...";
-    adb shell prlimit $PID 4 -1 -1
+    adb shell /system/bin/ulimit -p $PID -c unlimited
 }
 
 # core - send SIGV and pull the core for process
@@ -1106,8 +1148,7 @@ function stacks()
             adb shell cat $TMP
         else
             # Dump stacks of native process
-            local USE64BIT="$(is64bit $PID)"
-            adb shell debuggerd$USE64BIT -b $PID
+            adb shell debuggerd -b $PID
         fi
     fi
 }
@@ -1198,7 +1239,7 @@ case `uname -s` in
     Darwin)
         function mgrep()
         {
-            find -E . -name .repo -prune -o -name .git -prune -o -path ./out -prune -o -type f -iregex '.*/(Makefile|Makefile\..*|.*\.make|.*\.mak|.*\.mk)' \
+            find -E . -name .repo -prune -o -name .git -prune -o -path ./out -prune -o -type f -iregex '.*/(Makefile|Makefile\..*|.*\.make|.*\.mak|.*\.mk|.*\.bp)' \
                 -exec grep --color -n "$@" {} +
         }
 
@@ -1212,7 +1253,7 @@ case `uname -s` in
     *)
         function mgrep()
         {
-            find . -name .repo -prune -o -name .git -prune -o -path ./out -prune -o -regextype posix-egrep -iregex '(.*\/Makefile|.*\/Makefile\..*|.*\.make|.*\.mak|.*\.mk)' -type f \
+            find . -name .repo -prune -o -name .git -prune -o -path ./out -prune -o -regextype posix-egrep -iregex '(.*\/Makefile|.*\/Makefile\..*|.*\.make|.*\.mak|.*\.mk|.*\.bp)' -type f \
                 -exec grep --color -n "$@" {} +
         }
 

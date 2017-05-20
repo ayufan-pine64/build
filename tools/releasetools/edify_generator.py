@@ -77,26 +77,28 @@ class EdifyGenerator(object):
     with temporary=True) to this one."""
     self.script.extend(other.script)
 
-  def AssertOemProperty(self, name, value):
-    """Assert that a property on the OEM paritition matches a value."""
+  def AssertOemProperty(self, name, values):
+    """Assert that a property on the OEM paritition matches allowed values."""
     if not name:
       raise ValueError("must specify an OEM property")
-    if not value:
+    if not values:
       raise ValueError("must specify the OEM value")
+    get_prop_command = None
     if common.OPTIONS.oem_no_mount:
-      cmd = ('getprop("{name}") == "{value}" || '
-             'abort("E{code}: This package expects the value \\"{value}\\" for '
-             '\\"{name}\\"; this has value \\"" + '
-             'getprop("{name}") + "\\".");').format(
-                 code=common.ErrorCode.OEM_PROP_MISMATCH,
-                 name=name, value=value)
+      get_prop_command = 'getprop("%s")' % name
     else:
-      cmd = ('file_getprop("/oem/oem.prop", "{name}") == "{value}" || '
-             'abort("E{code}: This package expects the value \\"{value}\\" for '
-             '\\"{name}\\" on the OEM partition; this has value \\"" + '
-             'file_getprop("/oem/oem.prop", "{name}") + "\\".");').format(
-                 code=common.ErrorCode.OEM_PROP_MISMATCH,
-                 name=name, value=value)
+      get_prop_command = 'file_getprop("/oem/oem.prop", "%s")' % name
+
+    cmd = ''
+    for value in values:
+      cmd += '%s == "%s" || ' % (get_prop_command, value)
+    cmd += (
+        'abort("E{code}: This package expects the value \\"{values}\\" for '
+        '\\"{name}\\"; this has value \\"" + '
+        '{get_prop_command} + "\\".");').format(
+            code=common.ErrorCode.OEM_PROP_MISMATCH,
+            get_prop_command=get_prop_command, name=name,
+            values='\\" or \\"'.join(values))
     self.script.append(cmd)
 
   def AssertSomeFingerprint(self, *fp):
@@ -119,6 +121,17 @@ class EdifyGenerator(object):
            ' ||\n    abort("E%d: Package expects build thumbprint of %s; this '
            'device has " + getprop("ro.build.thumbprint") + ".");') % (
                common.ErrorCode.THUMBPRINT_MISMATCH, " or ".join(fp))
+    self.script.append(cmd)
+
+  def AssertFingerprintOrThumbprint(self, fp, tp):
+    """Assert that the current recovery build fingerprint is fp, or thumbprint
+       is tp."""
+    cmd = ('getprop("ro.build.fingerprint") == "{fp}" ||\n'
+           '    getprop("ro.build.thumbprint") == "{tp}" ||\n'
+           '    abort("Package expects build fingerprint of {fp} or '
+           'thumbprint of {tp}; this device has a fingerprint of " '
+           '+ getprop("ro.build.fingerprint") and a thumbprint of " '
+           '+ getprop("ro.build.thumbprint") + ".");').format(fp=fp, tp=tp)
     self.script.append(cmd)
 
   def AssertOlderBuild(self, timestamp, timestamp_text):
@@ -159,7 +172,7 @@ class EdifyGenerator(object):
     self.script.append("set_progress(%f);" % (frac,))
 
   def PatchCheck(self, filename, *sha1):
-    """Check that the given file (or MTD reference) has one of the
+    """Check that the given file has one of the
     given *sha1 hashes, checking the version saved in cache if the
     file does not match."""
     self.script.append(
@@ -169,7 +182,7 @@ class EdifyGenerator(object):
             common.ErrorCode.BAD_PATCH_FILE, filename))
 
   def Verify(self, filename):
-    """Check that the given file (or MTD reference) has one of the
+    """Check that the given file has one of the
     given hashes (encoded in the filename)."""
     self.script.append(
         'apply_patch_check("{filename}") && '
@@ -178,7 +191,7 @@ class EdifyGenerator(object):
             filename=filename))
 
   def FileCheck(self, filename, *sha1):
-    """Check that the given file (or MTD reference) has one of the
+    """Check that the given file has one of the
     given *sha1 hashes."""
     self.script.append('assert(sha1_check(read_file("%s")' % (filename,) +
                        "".join([', "%s"' % (i,) for i in sha1]) +
@@ -318,11 +331,7 @@ class EdifyGenerator(object):
       p = fstab[mount_point]
       partition_type = common.PARTITION_TYPES[p.fs_type]
       args = {'device': p.device, 'fn': fn}
-      if partition_type == "MTD":
-        self.script.append(
-            'write_raw_image(package_extract_file("%(fn)s"), "%(device)s");'
-            % args)
-      elif partition_type == "EMMC":
+      if partition_type == "EMMC":
         if mapfn:
           args["map"] = mapfn
           self.script.append(
